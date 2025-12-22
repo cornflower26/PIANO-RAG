@@ -383,20 +383,22 @@ if __name__ == "__main__":
     print("\n" + "=" * 50)
     print("Example 2: With detailed statistics")
     
+    
     size, count, stats = uniformize_pickle_with_stats(
         #'/home/ajanusze/wiki-pir-rag/index.pkl',
         #'/home/ajanusze/wiki-pir-rag/uniform_index.pkl',
-        '/Users/antoniajanuszewicz/PycharmProjects/PIANO-RAG/index_5000.pkl',
-        '/Users/antoniajanuszewicz/PycharmProjects/PIANO-RAG/uniform_index_5000_1024.txt',
-        target_size=None,  # Will use max size
-        pad_value=" "
-    )"""
-
-    size, count, stats = uniformize_pickle_for_pirrag_with_stats(
-        # '/home/ajanusze/wiki-pir-rag/index.pkl',
-        # '/home/ajanusze/wiki-pir-rag/uniform_index.pkl',
-        '/Users/antoniajanuszewicz/PycharmProjects/PIANO-RAG/index.pkl',
-        '/Users/antoniajanuszewicz/PycharmProjects/PIANO-RAG/pirrag_index_65000_1024.csv',
+        '/Users/antoniajanuszewicz/PycharmProjects/PIANO-RAG/index_10000000.pkl',
+        '/Users/antoniajanuszewicz/PycharmProjects/PIANO-RAG/uniform_index_10000000_1024.txt',
         target_size=None,  # Will use max size
         pad_value=" "
     )
+    """
+    size, count, stats = uniformize_pickle_for_pirrag_with_stats(
+        # '/home/ajanusze/wiki-pir-rag/index.pkl',
+        # '/home/ajanusze/wiki-pir-rag/uniform_index.pkl',
+        '/Users/antoniajanuszewicz/PycharmProjects/PIANO-RAG/index_1000000.pkl',
+        '/Users/antoniajanuszewicz/PycharmProjects/PIANO-RAG/pirrag_index_1000000_1024.csv',
+        target_size=None,  # Will use max size
+        pad_value=" "
+    )
+

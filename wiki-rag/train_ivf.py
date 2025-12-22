@@ -6,7 +6,7 @@ This script:
 1. Loads embeddings from FAISS vectorstore
 2. Trains IVF index with K=4096 clusters (IVF-flat first, optional PQ/OPQ)
 3. Measures recall/latency
-4. Exports centroids.npy + lists.json
+4. Exports 65000_centroids.npy + 65000_lists.json
 
 Usage examples:
     # Basic IVF-flat training with K=4096
@@ -502,7 +502,7 @@ def export_centroids_and_lists(
         print(f"  Extracted {len(centroids)} centroids of dimension {centroids.shape[1]}")
         
         # Save centroids
-        centroids_path = output_dir / "centroids.npy"
+        centroids_path = output_dir / "65000_centroids.npy"
         np.save(centroids_path, centroids)
         print(f"  Saved centroids to {centroids_path}")
         
@@ -577,7 +577,7 @@ def export_centroids_and_lists(
                 print(f"    Processed {min(i + batch_size, n_vectors)}/{n_vectors} vectors...")
     
     # Save lists
-    lists_path = output_dir / "lists.json"
+    lists_path = output_dir / "65000_lists.json"
     with open(lists_path, 'w') as f:
         json.dump(lists_data, f, indent=2)
     
@@ -606,7 +606,7 @@ def main():
         "--output-dir",
         type=str,
         default="./ivf_output",
-        help="Output directory for centroids.npy and lists.json"
+        help="Output directory for 65000_centroids.npy and 65000_lists.json"
     )
     parser.add_argument(
         "--k",

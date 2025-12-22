@@ -22,7 +22,7 @@ import faiss
 from langchain_community.embeddings import HuggingFaceEmbeddings
 
 from prototype.go_runner import run_built_executable
-from rag_utils import PromptedBGE
+from prototype.rag_utils import PromptedBGE
 
 
 class FHEQueryClient:
@@ -40,7 +40,8 @@ class FHEQueryClient:
         context_path: Path = None,
         poly_modulus_degree: int = 8192,
         coeff_mod_bit_sizes: list = [60, 40, 40, 60],
-        embedding_model_name: str = "BAAI/bge-base-en"
+        embedding_model_name: str = "BAAI/bge-base-en",
+        embedded_query: np.ndarray = None,
     ):
         """
         Initialize FHE query client.
@@ -51,6 +52,7 @@ class FHEQueryClient:
             coeff_mod_bit_sizes: Coefficient modulus bit sizes
             embedding_model_name: Name of embedding model
         """
+        self.embedded_query = embedded_query
         self.context_path = Path(context_path) if context_path else Path("./fhe_context")
         self.poly_modulus_degree = poly_modulus_degree
         self.coeff_mod_bit_sizes = coeff_mod_bit_sizes
@@ -118,6 +120,7 @@ class FHEQueryClient:
             Query embedding vector (768D)
         """
         embedding = self.embeddings.embed_query(query_text)
+        self.embedded_query = embedding
         return np.array(embedding, dtype=np.float32)
     
     def encrypt_query(self, query_vector: np.ndarray) -> ts.CKKSVector:
@@ -177,6 +180,7 @@ class FHEQueryClient:
         if isinstance(query, str):
             print(f"Embedding query: '{query[:50]}...'")
             query_vector = self.embed_query(query)
+            self.embedded_query = query_vector
         else:
             query_vector = np.array(query, dtype=np.float32)
             if query_vector.ndim > 1:
@@ -364,7 +368,7 @@ class FHEQueryClient:
             top_k_distances: Top-k distances (sorted)
             top_k_indices: Top-k centroid indices (sorted)
             output_path: Output directory
-            centroids_path: Optional path to centroids.npy for additional info
+            centroids_path: Optional path to 65000_centroids.npy for additional info
         """
         output_path = Path(output_path)
         output_path.mkdir(parents=True, exist_ok=True)
@@ -497,7 +501,7 @@ def main():
             "/Users/antoniajanuszewicz/GolandProjects/Piano-PIR-RAG/client_exe",
             args=["-ip", "localhost:50052", "-thread", "1", "-input",
                   "/Users/antoniajanuszewicz/PycharmProjects/PIANO-RAG/decrypted_results/top_k_results.json",
-                  "-extra_input", "/Users/antoniajanuszewicz/PycharmProjects/PIANO-RAG/prototype/data/lists.json"],
+                  "-extra_input", "/Users/antoniajanuszewicz/PycharmProjects/PIANO-RAG/prototype/data/65000_lists.json"],
             timeout=60
         )
         _, indices, vectors = extract_query_results(stderr)
@@ -681,7 +685,7 @@ def save_top_k_results(
             top_k_distances: Top-k distances (sorted)
             top_k_indices: Top-k centroid indices (sorted)
             output_path: Output directory
-            centroids_path: Optional path to centroids.npy for additional info
+            centroids_path: Optional path to 65000_centroids.npy for additional info
         """
         output_path = Path(output_path)
         output_path.mkdir(parents=True, exist_ok=True)

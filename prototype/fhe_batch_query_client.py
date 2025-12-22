@@ -366,7 +366,7 @@ class FHEQueryClient:
             top_k_distances: Top-k distances (sorted)
             top_k_indices: Top-k centroid indices (sorted)
             output_path: Output directory
-            centroids_path: Optional path to centroids.npy for additional info
+            centroids_path: Optional path to 65000_centroids.npy for additional info
         """
         output_path = Path(output_path)
         output_path.mkdir(parents=True, exist_ok=True)
@@ -505,7 +505,7 @@ def main():
             "/home/ajanusze/Piano-PIR-RAG/executables-kTLJOsi8Dr/___go_build_easypir_client_batch",
             args=["-ip", "localhost:50052", "-thread", "1", "-input",
                   "/home/ajanusze/PIANO-RAG/hotpot_pir_input.json",
-                  "-extra_input", "/home/ajanusze/PIANO-RAG/prototype/data/lists.json",
+                  "-extra_input", "/home/ajanusze/PIANO-RAG/prototype/data/65000_lists.json",
                   "-batch", "true"],
             timeout=420
         )
@@ -733,7 +733,7 @@ def save_top_k_results(
             top_k_distances: Top-k distances (sorted)
             top_k_indices: Top-k centroid indices (sorted)
             output_path: Output directory
-            centroids_path: Optional path to centroids.npy for additional info
+            centroids_path: Optional path to 65000_centroids.npy for additional info
         """
         output_path = Path(output_path)
         output_path.mkdir(parents=True, exist_ok=True)

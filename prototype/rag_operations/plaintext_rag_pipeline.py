@@ -342,7 +342,7 @@ def save_decrypted_results(
             top_k_distances: Top-k distances (sorted)
             top_k_indices: Top-k centroid indices (sorted)
             output_path: Output directory
-            centroids_path: Optional path to centroids.npy for additional info
+            centroids_path: Optional path to 65000_centroids.npy for additional info
         """
         output_path = Path(output_path)
         output_path.mkdir(parents=True, exist_ok=True)
@@ -487,6 +487,335 @@ def call_llm(prompt: str, model_name: str = None) -> str:
     return f"[LLM Response Placeholder]\n\nPrompt length: {len(prompt)} characters\n\nThis would call an LLM API (OpenAI, Anthropic, etc.) with the prompt above."
 
 
+def run_PIR_rag_pipeline(
+        query: str,
+        top_clusters: List[int],
+        lists: Dict[str, List[int]],
+        faiss_path: Path,
+        faiss_vectorstore: FAISS = None,
+        per_cluster_k: int = 5,
+        global_k: int = 10,
+        use_faiss_for_knn: bool = False
+) -> Dict:
+    """
+    Run the complete plaintext RAG pipeline.
+
+    Args:
+        query: User query text
+        top_clusters: List of top cluster IDs
+        lists: Cluster-to-vectors mapping
+        faiss_path: Path to FAISS index
+        faiss_vectorstore: Optional pre-loaded vectorstore
+        per_cluster_k: Top-k vectors per cluster
+        global_k: Global top-k to return
+        use_faiss_for_knn: Whether to use FAISS for KNN (vs pure NumPy)
+
+    Returns:
+        Dictionary with pipeline results
+    """
+    print("=" * 70)
+    print("Plaintext RAG Pipeline")
+    print("=" * 70)
+    print(f"\nQuery: {query}")
+    print(f"Top clusters: {len(top_clusters)}")
+    print(f"Per-cluster K: {per_cluster_k}")
+    print(f"Global K: {global_k}")
+
+    # Step 1: Embed query
+    print(f"\n{'=' * 70}")
+    print("Step 1: Embedding query...")
+    query_vector = embed_query(query)
+    print(f"✓ Query vector shape: {query_vector.shape}")
+
+    # Step 2: Load FAISS vectorstore if not provided
+    # ====================================================================
+    # FAISS INTERACTION: Loading FAISS index (index.faiss + index.pkl)
+    # ====================================================================
+    if faiss_vectorstore is None:
+        faiss_vectorstore = load_faiss_vectorstore(faiss_path)
+
+    # Extract all vectors
+    print(f"\n{'=' * 70}")
+    print("Step 2: Extracting vectors from FAISS...")
+    # ====================================================================
+    # FAISS INTERACTION: Reconstructing vectors from FAISS index
+    # ====================================================================
+    # - Uses index.reconstruct_n() or index.reconstruct() to get raw vectors
+    # - These are the numerical embeddings stored in the FAISS index
+    # - No document content here, just vector data
+    index = faiss_vectorstore.index
+    n_vectors = index.ntotal
+
+    try:
+        all_vectors = index.reconstruct_n(0, n_vectors)
+        print(f"✓ Extracted {len(all_vectors)} vectors")
+    except Exception as e:
+        print(f"Reconstructing vectors one by one...")
+        all_vectors = []
+        for i in range(n_vectors):
+            if (i + 1) % 10000 == 0:
+                print(f"  Reconstructed {i + 1}/{n_vectors}...")
+            vec = index.reconstruct(i)
+            all_vectors.append(vec)
+        all_vectors = np.array(all_vectors, dtype=np.float32)
+
+    # Step 3: Per-cluster KNN
+    print(f"\n{'=' * 70}")
+    print(f"Step 3: Per-cluster KNN (top-{per_cluster_k} per cluster)...")
+    all_candidates = []
+
+    for cluster_id in top_clusters:
+        cluster_id_str = str(cluster_id)
+        if cluster_id_str not in lists:
+            continue
+
+        vector_indices = lists[cluster_id_str]
+        cluster_results = per_cluster_knn(
+            query_vector,
+            cluster_id,
+            vector_indices,
+            all_vectors,
+            top_k=per_cluster_k
+        )
+        all_candidates.extend(cluster_results)
+
+    print(f"✓ Found {len(all_candidates)} candidates across {len(top_clusters)} clusters")
+    # replace this step
+
+    # Step 4: Global top-k
+    print(f"\n{'=' * 70}")
+    print(f"Step 4: Global top-{global_k} selection...")
+    if use_faiss_for_knn:
+        print("  Using FAISS IndexFlatL2 for KNN...")
+    else:
+        print("  Using pure NumPy for sorting...")
+
+    # run executable
+    # retrieve info from it
+
+    stdout, stderr, code = run_built_executable(
+        "/Users/antoniajanuszewicz/GolandProjects/Piano-PIR-RAG/client_exe",
+        args=["-ip", "localhost:50052", "-thread", "1", "-input",
+              "/Users/antoniajanuszewicz/PycharmProjects/PIANO-RAG/decrypted_results/top_k_results.json"],
+        timeout=60
+    )
+    _, indices, vectors = extract_query_results(stderr)
+
+    top_k_results = pir_global_top_k(
+        indices,
+        query_vector,
+        vectors,
+        top_k=global_k,
+        use_faiss=True
+    )
+    """
+    top_k_results = global_top_k(
+        all_candidates,
+        query_vector,
+        all_vectors,
+        top_k=global_k,
+        use_faiss=use_faiss_for_knn
+    )"""
+    top_k_indices = [idx for idx, _ in top_k_results]
+    top_k_distances = [dist for _, dist in top_k_results]
+
+    save_decrypted_results(np.array(top_k_distances), np.array(top_k_indices),
+                           Path("/home/ajanusze/PIANO_RAG/prototype/rag_operations"))
+
+    print(f"✓ Selected top-{len(top_k_results)} vectors:")
+    for i, (idx, dist) in enumerate(top_k_results, 1):
+        print(f"  {i}. Vector {idx}: distance = {dist:.4f}")
+    # replace this step
+
+    # Step 5: Map vector IDs → documents
+    print(f"\n{'=' * 70}")
+    print("Step 5: Mapping vector IDs to documents...")
+    # ====================================================================
+    # DOCUMENT/PICKLE INTERACTION: Getting actual document content
+    # ====================================================================
+    # - Translates vector indices → Document objects via docstore
+    # - Documents contain page_content (text) and metadata (title)
+    # documents = get_documents_by_indices(faiss_vectorstore, top_k_indices)
+    documents = pir_get_documents_by_indices(top_k_indices)
+    # print(documents)
+    print(top_k_indices)
+    print(f"✓ Retrieved {len(documents)} documents")
+
+    # Step 6: Build RAG prompt
+    print(f"\n{'=' * 70}")
+    print("Step 6: Building RAG prompt...")
+    rag_prompt = build_rag_prompt(query, documents)
+    print(f"✓ Prompt length: {len(rag_prompt)} characters")
+
+    # Step 7: Call LLM
+    print(f"\n{'=' * 70}")
+    print("Step 7: Calling LLM...")
+    llm_response = call_llm(rag_prompt)
+    print(f"✓ LLM response generated")
+
+    print(f"\n{'=' * 70}")
+    print("Pipeline Complete!")
+    print(f"{'=' * 70}")
+
+    return {
+        "query": query,
+        "top_clusters": top_clusters,
+        "candidates_count": len(all_candidates),
+        "top_k_indices": top_k_indices,
+        "top_k_distances": top_k_distances,
+        "documents": [
+            {
+                "index": idx,
+                # "title": doc.metadata.get('title', 'Unknown'),
+                "content_preview": doc[:200],
+                "distance": dist
+            }
+            for idx, dist, doc in zip(top_k_indices, top_k_distances, documents)
+        ],
+        "rag_prompt": rag_prompt,
+        "llm_response": llm_response
+    }
+
+
+def run_plaintext_rag(
+        query: str,
+        top_clusters: List[int],
+        lists: Dict[str, List[int]],
+        faiss_path: Path,
+        faiss_vectorstore: FAISS = None,
+        per_cluster_k: int = 5,
+        global_k: int = 10,
+        use_faiss_for_knn: bool = False
+) -> Dict:
+    """
+    Run the complete plaintext RAG pipeline.
+
+    Args:
+        query: User query text
+        top_clusters: List of top cluster IDs
+        lists: Cluster-to-vectors mapping
+        faiss_path: Path to FAISS index
+        faiss_vectorstore: Optional pre-loaded vectorstore
+        per_cluster_k: Top-k vectors per cluster
+        global_k: Global top-k to return
+        use_faiss_for_knn: Whether to use FAISS for KNN (vs pure NumPy)
+
+    Returns:
+        Dictionary with pipeline results
+    """
+    print("=" * 70)
+    print("Plaintext RAG Pipeline")
+    print("=" * 70)
+    print(f"\nQuery: {query}")
+    print(f"Top clusters: {len(top_clusters)}")
+    print(f"Per-cluster K: {per_cluster_k}")
+    print(f"Global K: {global_k}")
+
+    # Step 1: Embed query
+    print(f"\n{'=' * 70}")
+    print("Step 1: Embedding query...")
+    query_vector = embed_query(query)
+    print(f"✓ Query vector shape: {query_vector.shape}")
+
+    # Step 2: Load FAISS vectorstore if not provided
+    # ====================================================================
+    # FAISS INTERACTION: Loading FAISS index (index.faiss + index.pkl)
+    # ====================================================================
+    if faiss_vectorstore is None:
+        faiss_vectorstore = load_faiss_vectorstore(faiss_path)
+
+    # Extract all vectors
+    print(f"\n{'=' * 70}")
+    print("Step 2: Extracting vectors from FAISS...")
+    # ====================================================================
+    # FAISS INTERACTION: Reconstructing vectors from FAISS index
+    # ====================================================================
+    # - Uses index.reconstruct_n() or index.reconstruct() to get raw vectors
+    # - These are the numerical embeddings stored in the FAISS index
+    # - No document content here, just vector data
+    index = faiss_vectorstore.index
+    n_vectors = index.ntotal
+
+    try:
+        all_vectors = index.reconstruct_n(0, n_vectors)
+        print(f"✓ Extracted {len(all_vectors)} vectors")
+    except Exception as e:
+        print(f"Reconstructing vectors one by one...")
+        all_vectors = []
+        for i in range(n_vectors):
+            if (i + 1) % 10000 == 0:
+                print(f"  Reconstructed {i + 1}/{n_vectors}...")
+            vec = index.reconstruct(i)
+            all_vectors.append(vec)
+        all_vectors = np.array(all_vectors, dtype=np.float32)
+
+    top_k_results = global_top_k(
+        all_vectors,
+        query_vector,
+        all_vectors,
+        top_k=global_k,
+        use_faiss=True
+    )
+    top_k_indices = [idx for idx, _ in top_k_results]
+    top_k_distances = [dist for _, dist in top_k_results]
+
+    save_decrypted_results(np.array(top_k_distances), np.array(top_k_indices),
+                           Path("/home/ajanusze/PIANO-RAG/prototype/rag_operations"))
+
+    print(f"✓ Selected top-{len(top_k_results)} vectors:")
+    for i, (idx, dist) in enumerate(top_k_results, 1):
+        print(f"  {i}. Vector {idx}: distance = {dist:.4f}")
+    # replace this step
+
+    # Step 5: Map vector IDs → documents
+    print(f"\n{'=' * 70}")
+    print("Step 5: Mapping vector IDs to documents...")
+    # ====================================================================
+    # DOCUMENT/PICKLE INTERACTION: Getting actual document content
+    # ====================================================================
+    # - Translates vector indices → Document objects via docstore
+    # - Documents contain page_content (text) and metadata (title)
+    documents = get_documents_by_indices(faiss_vectorstore, top_k_indices)
+    # documents = pir_get_documents_by_indices(top_k_indices)
+    # print(documents)
+    print(top_k_indices)
+    print(f"✓ Retrieved {len(documents)} documents")
+
+    # Step 6: Build RAG prompt
+    print(f"\n{'=' * 70}")
+    print("Step 6: Building RAG prompt...")
+    rag_prompt = build_rag_prompt(query, documents)
+    print(f"✓ Prompt length: {len(rag_prompt)} characters")
+
+    # Step 7: Call LLM
+    print(f"\n{'=' * 70}")
+    print("Step 7: Calling LLM...")
+    llm_response = call_llm(rag_prompt)
+    print(f"✓ LLM response generated")
+
+    print(f"\n{'=' * 70}")
+    print("Pipeline Complete!")
+    print(f"{'=' * 70}")
+
+    return {
+        "query": query,
+        "top_clusters": top_clusters,
+        #"candidates_count": len(all_candidates),
+        "top_k_indices": top_k_indices,
+        "top_k_distances": top_k_distances,
+        "documents": [
+            {
+                "index": idx,
+                "title": doc.metadata.get('title', 'Unknown'),
+                # "content_preview": doc[:200],
+                "distance": dist
+            }
+            for idx, dist, doc in zip(top_k_indices, top_k_distances, documents)
+        ],
+        "rag_prompt": rag_prompt,
+        "llm_response": llm_response
+    }
+
 def run_plaintext_rag_pipeline(
     query: str,
     top_clusters: List[int],
@@ -594,7 +923,7 @@ def run_plaintext_rag_pipeline(
 
     #run executable
     #retrieve info from it
-
+    """
     stdout, stderr, code = run_built_executable(
         "/Users/antoniajanuszewicz/GolandProjects/Piano-PIR-RAG/client_exe",
         args=["-ip", "localhost:50052", "-thread", "1", "-input",
@@ -602,7 +931,7 @@ def run_plaintext_rag_pipeline(
         timeout=60
     )
     _, indices, vectors = extract_query_results(stderr)
-
+    
     top_k_results = pir_global_top_k(
         indices,
         query_vector,
@@ -617,11 +946,11 @@ def run_plaintext_rag_pipeline(
         all_vectors,
         top_k=global_k,
         use_faiss=use_faiss_for_knn
-    )"""
+    )
     top_k_indices = [idx for idx, _ in top_k_results]
     top_k_distances = [dist for _, dist in top_k_results]
 
-    save_decrypted_results(np.array(top_k_distances),np.array(top_k_indices),Path("/Users/antoniajanuszewicz/PycharmProjects/PIANO-RAG/prototype/rag_operations"))
+    save_decrypted_results(np.array(top_k_distances),np.array(top_k_indices),Path("/home/ajanusze/PIANO-RAG/prototype/rag_operations"))
     
     print(f"✓ Selected top-{len(top_k_results)} vectors:")
     for i, (idx, dist) in enumerate(top_k_results, 1):
@@ -638,8 +967,8 @@ def run_plaintext_rag_pipeline(
     # ====================================================================
     # - Translates vector indices → Document objects via docstore
     # - Documents contain page_content (text) and metadata (title)
-    #documents = get_documents_by_indices(faiss_vectorstore, top_k_indices)
-    documents = pir_get_documents_by_indices(top_k_indices)
+    documents = get_documents_by_indices(faiss_vectorstore, top_k_indices)
+    #documents = pir_get_documents_by_indices(top_k_indices)
     #print(documents)
     print(top_k_indices)
     print(f"✓ Retrieved {len(documents)} documents")
@@ -669,8 +998,8 @@ def run_plaintext_rag_pipeline(
         "documents": [
             {
                 "index": idx,
-                #"title": doc.metadata.get('title', 'Unknown'),
-                "content_preview": doc[:200],
+                "title": doc.metadata.get('title', 'Unknown'),
+                #"content_preview": doc[:200],
                 "distance": dist
             }
             for idx, dist, doc in zip(top_k_indices, top_k_distances, documents)
@@ -699,8 +1028,8 @@ def main():
     parser.add_argument(
         "--lists",
         type=str,
-        default="../data/lists.json",
-        help="Path to lists.json file"
+        default="../data/65000_lists.json",
+        help="Path to 65000_lists.json file"
     )
     parser.add_argument(
         "--faiss-path",
@@ -742,7 +1071,7 @@ def main():
     lists = load_cluster_lists(args.lists)
     
     # Run pipeline
-    results = run_plaintext_rag_pipeline(
+    results = run_plaintext_rag(
         query=args.query,
         top_clusters=top_clusters,
         lists=lists,
@@ -759,7 +1088,7 @@ def main():
     results_json = {
         "query": results["query"],
         "top_clusters": results["top_clusters"],
-        "candidates_count": results["candidates_count"],
+        #"candidates_count": results["candidates_count"],
         "top_k_results": [
             {
                 "vector_index": idx,
