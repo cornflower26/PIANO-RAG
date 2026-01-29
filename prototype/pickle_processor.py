@@ -257,16 +257,19 @@ def uniformize_pickle_for_pirrag_with_stats(
     else:
         (entrydocstore, keysdict) = data
         entrydict = entrydocstore.__dict__
-        dockeys = list(list(entrydict.values())[0].keys())
+        #dockeys = list(list(entrydict.values())[0].keys())
         entrydocs = list(list(entrydict.values())[0].values())
+        #entrydocs = list(list(entrydict.values())[0][0][1].values())[:1000]
         print(len(entrydocs))
+        #print(entrydocs)
         #print(list(entrydict.values())[0])
         entries = []
         for value in entrydocs:
-            if (len(value.page_content) > 1024):
-                entries.append(value.page_content[0:1024])
-            else:
-                entries.append(value.page_content)
+            entries.append(value.page_content)
+        #    if (len(value.page_content) > 1024):
+        #        entries.append(value.page_content[0:1024])
+        #    else:
+        #        entries.append(value.page_content)
         print(entries[0])
         print(len(entries[0]))
         keys = list(keysdict.keys())
@@ -310,12 +313,14 @@ def uniformize_pickle_for_pirrag_with_stats(
                 uniform_entry.append(character)
             while len(uniform_entry) < target_size:
                 uniform_entry.append(pad_value)
-            '''
+            
             uniform_entry = ""
             for character in entry:
                 uniform_entry += character
             while len(uniform_entry) < target_size:
                 uniform_entry += pad_value
+            '''
+            uniform_entry = entry[:target_size]
 
         uniform_entries.append(uniform_entry)
 
@@ -387,18 +392,20 @@ if __name__ == "__main__":
     size, count, stats = uniformize_pickle_with_stats(
         #'/home/ajanusze/wiki-pir-rag/index.pkl',
         #'/home/ajanusze/wiki-pir-rag/uniform_index.pkl',
-        '/Users/antoniajanuszewicz/PycharmProjects/PIANO-RAG/index_10000000.pkl',
-        '/Users/antoniajanuszewicz/PycharmProjects/PIANO-RAG/uniform_index_10000000_1024.txt',
+        '/home/ajanusze/PIANO-RAG/fever_index.pkl',
+        '/home/ajanusze/PIANO-RAG/fever_index.txt',
         target_size=None,  # Will use max size
         pad_value=" "
     )
     """
+
     size, count, stats = uniformize_pickle_for_pirrag_with_stats(
         # '/home/ajanusze/wiki-pir-rag/index.pkl',
         # '/home/ajanusze/wiki-pir-rag/uniform_index.pkl',
-        '/Users/antoniajanuszewicz/PycharmProjects/PIANO-RAG/index_1000000.pkl',
-        '/Users/antoniajanuszewicz/PycharmProjects/PIANO-RAG/pirrag_index_1000000_1024.csv',
-        target_size=None,  # Will use max size
+        '/home/ajanusze/PIANO-RAG/fever_index.pkl',
+        '/home/ajanusze/PIANO-RAG/fever_index.csv',
+        target_size=1000,  # Will use max size
         pad_value=" "
     )
+
 

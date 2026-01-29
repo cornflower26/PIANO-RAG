@@ -47,7 +47,8 @@ def run_pir_rag_experiment(queries: List[np.ndarray], dataset_size: int = 65000,
     # Initialize server
     server = FHEQueryServer(
         context_path=Path("./fhe_context"),
-        centroids_path=Path(f"./prototype/data/{dataset_size}_centroids.npy"),
+        centroids_path=Path(f"./prototype/data/65000_centroids.npy"),
+        #centroids_path=Path(f"./prototype/data/1000_centroids.npy"),
         poly_modulus_degree=8192
     )
 
@@ -99,7 +100,7 @@ def run_pir_rag_experiment(queries: List[np.ndarray], dataset_size: int = 65000,
     print("=" * 70)
     print("FHE Query Server - Distance Computation")
     print("=" * 70)
-    print()
+    print("Encrypted query upload " + str(sys.getsizeof(encrypted_query)))
 
     # Load encrypted query
     encrypted_query, encrypted_norm = server.load_encrypted_query(
@@ -119,6 +120,7 @@ def run_pir_rag_experiment(queries: List[np.ndarray], dataset_size: int = 65000,
         encrypted_distances,
         Path("./encrypted_distances")
     )
+    print("Encrypted distances upload " + str(sys.getsizeof(encrypted_distances)))
 
     print(f"\n{'=' * 70}")
     print("Summary")
@@ -187,6 +189,7 @@ def run_pir_rag_experiment(queries: List[np.ndarray], dataset_size: int = 65000,
                   "-extra_input",
                   #f"/Users/antoniajanuszewicz/PycharmProjects/
                   f"/home/ajanusze/PIANO-RAG/prototype/data/{dataset_size}_lists.json", "-numEntries", f"{actual_dataset_size}"],
+                  #f"/home/ajanusze/PIANO-RAG/prototype/data/nq_100_lists.json", "-numEntries", f"{actual_dataset_size}"],
             timeout=60
         )
         #print(stderr)
@@ -541,13 +544,54 @@ def main():
     #to allow this to run, this runs with the bigger databases (this shouldn't affect the numbers?)
     query = "What is machine learning?"
     embedded_query = embed_query(query)
+    """
+    query_path = Path("/home/ajanusze/PIANO-RAG/nq_100_queries.json")
+    query_vector = parse_questions_from_file(query_path)
+    print(query_vector)
+    queries = []
+    # len(query_vector)
+    for i in range(0, len(query_vector)):
+        queries.append(np.array(embed_query(query_vector[i][1])))
+        print(query_vector[i][1])
+    """
+
     datasets = [1000, 5000, 10000, 65000,1000000]
     #datasets = [65000]
     clusters = [50,250,500,4096,4096]
     cluster_top = [4,20,40,100,100]
-    test = 1
-    print(run_pir_rag_experiment([embedded_query], dataset_size=datasets[test], k_clusters=clusters[test],cluster_top_k=cluster_top[test], top_k=10))
+    test = 0
+
+    #print(run_pir_rag_experiment([embedded_query], dataset_size=datasets[test], k_clusters=clusters[test],cluster_top_k=cluster_top[test], top_k=10))
+    print(run_pir_rag_experiment([embedded_query], dataset_size=65000, k_clusters=4096, cluster_top_k=50, top_k=50))
+
+
+    #with open("./nq_results.txt", 'a') as f:
+    #    for q in queries:
+    #        print("Next one")
+    #        f.write(str(run_pir_rag_experiment([q], dataset_size=datasets[test], k_clusters=clusters[test],cluster_top_k=cluster_top[test], top_k=10)))
+    #        f.write("\n")
+
     return
+
+
+
+def parse_questions_from_file(filepath):
+    """
+    Parse question data from a JSON file and return a dictionary mapping IDs to questions.
+
+    Args:
+        filepath: Path to the file containing question data (newline-delimited JSON format)
+
+    Returns:
+        dict: Dictionary mapping id (int) -> question (str)
+    """
+    id_to_question = {}
+
+    with open(filepath, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    results = [(item['query_id'], item['query_text']) for item in data['queries']]
+    return results
 
 if __name__ == "__main__":
     main()
