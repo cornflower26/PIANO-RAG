@@ -39,7 +39,7 @@ class FHEQueryServer:
         
         Args:
             context_path: Path to encryption context (public key)
-            centroids_path: Path to centroids.npy file
+            centroids_path: Path to 65000_centroids.npy file
             poly_modulus_degree: Polynomial modulus degree (must match client)
         """
         self.context_path = Path(context_path)
@@ -424,7 +424,7 @@ def main():
         "--centroids-path",
         type=str,
         required=True,
-        help="Path to centroids.npy file"
+        help="Path to 65000_centroids.npy file"
     )
     parser.add_argument(
         "--encrypted-query",

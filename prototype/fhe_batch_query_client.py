@@ -11,6 +11,8 @@ This script:
 
 import argparse
 import json
+import os
+
 import numpy as np
 from pathlib import Path
 from typing import Union, Tuple
@@ -22,7 +24,7 @@ import faiss
 from langchain_community.embeddings import HuggingFaceEmbeddings
 
 from prototype.go_runner import run_built_executable
-from prototype.rag_utils import PromptedBGE
+from rag_utils import PromptedBGE
 
 
 class FHEQueryClient:
@@ -40,8 +42,7 @@ class FHEQueryClient:
         context_path: Path = None,
         poly_modulus_degree: int = 8192,
         coeff_mod_bit_sizes: list = [60, 40, 40, 60],
-        embedding_model_name: str = "BAAI/bge-base-en",
-        embedded_query: np.ndarray = None,
+        embedding_model_name: str = "BAAI/bge-base-en"
     ):
         """
         Initialize FHE query client.
@@ -52,7 +53,6 @@ class FHEQueryClient:
             coeff_mod_bit_sizes: Coefficient modulus bit sizes
             embedding_model_name: Name of embedding model
         """
-        self.embedded_query = embedded_query
         self.context_path = Path(context_path) if context_path else Path("./fhe_context")
         self.poly_modulus_degree = poly_modulus_degree
         self.coeff_mod_bit_sizes = coeff_mod_bit_sizes
@@ -120,7 +120,6 @@ class FHEQueryClient:
             Query embedding vector (768D)
         """
         embedding = self.embeddings.embed_query(query_text)
-        self.embedded_query = embedding
         return np.array(embedding, dtype=np.float32)
     
     def encrypt_query(self, query_vector: np.ndarray) -> ts.CKKSVector:
@@ -180,7 +179,6 @@ class FHEQueryClient:
         if isinstance(query, str):
             print(f"Embedding query: '{query[:50]}...'")
             query_vector = self.embed_query(query)
-            self.embedded_query = query_vector
         else:
             query_vector = np.array(query, dtype=np.float32)
             if query_vector.ndim > 1:
@@ -334,7 +332,7 @@ class FHEQueryClient:
             with open(dist_file, 'rb') as f:
                 encrypted_bytes = f.read()
             
-            # Decrypt
+            # Decrypt pls
             encrypted_distance = ts.ckks_vector_from(self.context, encrypted_bytes)
             distance_value = encrypted_distance.decrypt()[0]  # Decrypt and get scalar
             all_distances.append(distance_value)
@@ -492,56 +490,61 @@ def main():
         print(f"\n{'=' * 70}")
         print(f"Step 4: Global top-{global_k} selection...")
 
-        query_vector = embed_query(args.query)
+        print("Parsing query embeddings")
+        query_vector = parse_questions_from_file(args.query)
+        print(query_vector)
+        for i in range(0, len(query_vector)):
+            print(query_vector[i])
+            query_vector[i] = embed_query(query_vector[i])
 
         # run executable
         # retrieve info from it
+        print("Running batched client")
 
         stdout, stderr, code = run_built_executable(
-            "/Users/antoniajanuszewicz/GolandProjects/Piano-PIR-RAG/client_exe",
+            "/home/ajanusze/Piano-PIR-RAG/executables-kTLJOsi8Dr/___go_build_easypir_client_batch",
             args=["-ip", "localhost:50052", "-thread", "1", "-input",
-                  "/Users/antoniajanuszewicz/PycharmProjects/PIANO-RAG/decrypted_results/top_k_results.json",
-                  "-extra_input", "/Users/antoniajanuszewicz/PycharmProjects/PIANO-RAG/prototype/data/65000_lists.json"],
-            timeout=60
+                  "/home/ajanusze/PIANO-RAG/hotpot_pir_input.json",
+                  "-extra_input", "/home/ajanusze/PIANO-RAG/prototype/data/65000_lists.json",
+                  "-batch", "true"],
+            timeout=420
         )
-        _, indices, vectors = extract_query_results(stderr)
+        map_of_vectors, map_of_indices = parse_query_results(stderr)
+        print(map_of_indices)
 
-        top_k_results = pir_global_top_k(
-            indices,
-            query_vector,
-            vectors,
-            top_k=global_k,
-            use_faiss=True
-        )
-        """
-        top_k_results = global_top_k(
-            all_candidates,
-            query_vector,
-            all_vectors,
-            top_k=global_k,
-            use_faiss=use_faiss_for_knn
-        )"""
-        top_k_indices = [idx for idx, _ in top_k_results]
-        top_k_distances = [dist for _, dist in top_k_results]
+        os.remove("/home/ajanusze/PIANO-RAG/prototype/ground_truth/ground_truth.json")
+        for i in range(0, len(map_of_vectors)):
+            print("Processing query " + str(i))
+            top_k_results = pir_global_top_k(
+                map_of_indices[i],
+                query_vector[i],
+                map_of_vectors[i],
+                top_k=global_k,
+                use_faiss=True
+            )
+            top_k_indices = [idx for idx, _ in top_k_results]
+            print(top_k_indices)
+            top_k_distances = [dist for _, dist in top_k_results]
+            print(top_k_distances)
 
-        save_top_k_results(np.array(top_k_distances), np.array(top_k_indices),
-                               Path("/Users/antoniajanuszewicz/PycharmProjects/PIANO-RAG/prototype/ground_truth"))
+            save_top_k_results(np.array(top_k_distances), np.array(top_k_indices),
+                               Path("/home/ajanusze/PIANO-RAG/prototype/ground_truth"))
 
-        print(f"✓ Selected top-{len(top_k_results)} vectors:")
-        for i, (idx, dist) in enumerate(top_k_results, 1):
-            print(f"  {i}. Vector {idx}: distance = {dist:.4f}")
-        # replace this step
+            print(f"✓ Selected top-{len(top_k_results)} vectors:")
+            for i, (idx, dist) in enumerate(top_k_results, 1):
+                print(f"  {i}. Vector {idx}: distance = {dist:.4f}")
+            # replace this step
 
-        # Step 5: Map vector IDs → documents
+            # Step 5: Map vector IDs → documents
         print(f"\n{'=' * 70}")
         print("Step 5: Mapping vector IDs to documents...")
-        # ====================================================================
-        # DOCUMENT/PICKLE INTERACTION: Getting actual document content
-        # ====================================================================
-        # - Translates vector indices → Document objects via docstore
-        # - Documents contain page_content (text) and metadata (title)
-        # documents = get_documents_by_indices(faiss_vectorstore, top_k_indices)
-        documents = pir_get_documents_by_indices(top_k_indices)
+            # ====================================================================
+            # DOCUMENT/PICKLE INTERACTION: Getting actual document content
+            # ====================================================================
+            # - Translates vector indices → Document objects via docstore
+            # - Documents contain page_content (text) and metadata (title)
+            # documents = get_documents_by_indices(faiss_vectorstore, top_k_indices)
+        documents = pir_get_documents_by_indices()
         print(documents)
         print(top_k_indices)
         print(f"✓ Retrieved {len(documents)} documents")
@@ -649,17 +652,64 @@ def extract_query_results(log_string):
 
     return cluster_ids, indices, vectors
 
-def pir_get_documents_by_indices(
-        vector_indices: List[int]
-) -> List[str]:
+
+def parse_query_results(log_text):
+    """
+    Parse query results from log text and return dictionaries for both embeddings and indices.
+
+    Args:
+        log_text: String containing the log output with query results
+
+    Returns:
+        tuple: (query_embeddings, query_indices)
+            - query_embeddings: dict mapping query_id (int) -> numpy array of embeddings (float32)
+            - query_indices: dict mapping query_id (int) -> index (int)
+    """
+    query_embeddings = {}
+    query_indices = {}
+
+    # Pattern to match lines like: "Final query result at query 83 at index 2955: [vector values]"
+    pattern = r'Final query result at query \[([\d\s]+)\] at index (\d+): \[([-\d.e\s]+)\]'
+
+    matches = re.finditer(pattern, log_text)
+
+    for match in matches:
+        query_id = match.group(1).strip()
+        index = int(match.group(2))
+        vector_str = match.group(3)
+        # Split by whitespace and convert to floats
+        vector_values = [float(x) for x in vector_str.split()]
+        #print(vector_values)
+
+        #print(f"Match for {query_id} at index {index}")
+        query_id_values = [float(x) for x in query_id.split()]
+        # Store the index
+        for elements in query_id_values:
+            if query_indices.get(elements) is None:
+                query_indices[elements] = [index]
+            else:
+                query_indices[elements].append(index)
+            #print(index)
+            # Convert to numpy array
+            if query_embeddings.get(elements) is None:
+                query_embeddings[elements] = [np.array(vector_values, dtype=np.float32)]
+            else:
+                query_embeddings[elements].append(np.array(vector_values, dtype=np.float32))
+
+    for embedding in query_embeddings:
+        query_embeddings[embedding] = np.array(query_embeddings[embedding], dtype=np.float32)
+
+    return query_embeddings, query_indices
+
+def pir_get_documents_by_indices() -> Dict[int,str]:
     stdout, stderr, code = run_built_executable(
-        "/Users/antoniajanuszewicz/GolandProjects/Piano-PIR-RAG/client_exe",
+        "/home/ajanusze/Piano-PIR-RAG/executables-duY1Uhgqfu/___go_build_easypir_client_batch",
         args=["-ip", "localhost:50051", "-thread", "1", "-input",
-              "/Users/antoniajanuszewicz/PycharmProjects/PIANO-RAG/prototype/ground_truth/ground_truth.json"],
-        timeout=60
+              "/home/ajanusze/PIANO-RAG/prototype/ground_truth/ground_truth.json", "-batch", "true"],
+        timeout=240
     )
-    #print(stderr)
     indices, text = extract_text_query_results(stderr)
+    print(indices)
     documents = text
 
     # ====================================================================
@@ -668,8 +718,6 @@ def pir_get_documents_by_indices(
     # - docstore contains the actual document text and metadata
     # - Loaded from index.pkl file (pickle format)
     # - docstore._dict maps doc_id → Document object
-
-
     return documents
 
 def save_top_k_results(
@@ -701,8 +749,18 @@ def save_top_k_results(
         }
 
         results_file = output_path / "ground_truth.json"
-        with open(results_file, 'w') as f:
-            json.dump(results, f, indent=2)
+        # Check if file exists and is not empty
+        if os.path.exists(results_file):
+            # File exists and has content - read and append
+            with open(results_file, 'r+') as f:
+                file_data = json.load(f)
+                file_data.append(results)
+                f.seek(0)
+                json.dump(file_data, f, indent=2)
+        else:
+            # File doesn't exist or is empty - create new file with first entry
+            with open(results_file, 'w') as f:
+                json.dump([results], f, indent=2)
         print(f"✓ Saved results to {results_file}")
 
         # Save as numpy arrays for easy loading
@@ -732,38 +790,46 @@ def extract_text_query_results(log_string):
         indices: list of int - the extracted indices
         texts: list of str - the corresponding text results
     """
-    indices = []
-    texts = []
+    indices = {}
+    texts = {}
 
     # Split into lines
     lines = log_string.strip().split('\n')
 
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-
-        # Look for lines that contain "Final query result at index"
-        if "Final query result at index" in line:
-            # Extract the index number
-            match = re.search(r'at index (\d+):', line)
+    # Pattern to match lines like: "Final query result at query 83 at index 2955: [vector values]"
+    pattern = r'Final query result from query \[([\d\s]+)\] at index (\d+):'
+    for line in lines:
+        if "Final query result" in line:
+            #print(line)
+            match = re.search(pattern, line)
             if match:
-                index = int(match.group(1))
+                # Parse query ID(s) - can be single or multiple
+                query_ids_str = match.group(1).strip()
+                #print(query_ids_str)
+                query_id_list = [int(x) for x in query_ids_str.split()]
+
+                # If only one query ID, use it as single int
+                index = int(match.group(2))
 
                 # Extract the text after the colon
-                # Split at ': ' and take everything after
+                text = ''
                 parts = line.split(': ', 1)
                 if len(parts) == 2:
-                    text = parts[1].strip()
+                    text = [parts[1].strip()]
+                for elements in query_id_list:
+                    if indices.get(elements) is None:
+                        indices[elements] = [index]
+                        texts[elements] = [text]
+                    else:
+                        indices[elements].append(index)
+                        texts[elements].append(text)
 
-                    indices.append(index)
-                    texts.append(text)
-
-        i += 1
+                #print(f"Query at index {query_ids_str}: {text}")
 
     return indices, texts
 
 def pir_global_top_k(
-        indexes: List[str],
+        indexes: List[int],
         query_vector: np.ndarray,
         all_vectors: np.ndarray,
         top_k: int = 10,
@@ -785,6 +851,8 @@ def pir_global_top_k(
         Top-k (vector_index, distance) tuples sorted by distance
     """
     if use_faiss and len(indexes) > 0:
+        if (top_k > len(indexes)):
+            top_k = len(indexes)
         # ====================================================================
         # FAISS INTERACTION: Building temporary FAISS IndexFlatL2 for KNN
         # ====================================================================
@@ -816,6 +884,34 @@ def embed_query(query_text: str) -> np.ndarray:
     embeddings = PromptedBGE(model_name="BAAI/bge-base-en")
     query_vec = embeddings.embed_query(query_text)
     return np.array(query_vec, dtype=np.float32)
+
+
+def parse_questions_from_file(filepath):
+    """
+    Parse question data from a JSON file and return a dictionary mapping IDs to questions.
+
+    Args:
+        filepath: Path to the file containing question data (newline-delimited JSON format)
+
+    Returns:
+        dict: Dictionary mapping id (int) -> question (str)
+    """
+    id_to_question = {}
+
+    with open(filepath, 'r', encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            if line:  # Skip empty lines
+                try:
+                    item = json.loads(line)
+                    if 'id' in item and 'question' in item:
+                        id_to_question[item['id']] = item['question']
+                        #print(id_to_question[item['id']])
+                except json.JSONDecodeError as e:
+                    print(f"Warning: Skipping invalid JSON line: {e}")
+                    continue
+
+    return id_to_question
 
 if __name__ == "__main__":
     main()

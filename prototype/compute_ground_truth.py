@@ -214,8 +214,8 @@ def main():
     parser.add_argument(
         "--lists",
         type=str,
-        default="./data/lists.json",
-        help="Path to lists.json file"
+        default="./data/65000_lists.json",
+        help="Path to 65000_lists.json file"
     )
     parser.add_argument(
         "--faiss-path",
